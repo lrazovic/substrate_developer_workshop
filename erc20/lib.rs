@@ -18,22 +18,30 @@ mod erc20 {
         pub fn new(initial_supply: Balance) -> Self {
             // ACTION: `set` the total supply to `initial_supply`
             // ACTION: `insert` the `initial_supply` as the `caller` balance
+            let mut balances = ink_storage::collections::HashMap::new();
+            balances.insert(Self::env().caller(), initial_supply);
+            Self {
+                total_supply: initial_supply,
+                balances: balances
+            }
         }
 
         #[ink(message)]
         pub fn total_supply(&self) -> Balance {
-            // ACTION: Return the total supply
+            self.total_supply
         }
 
         #[ink(message)]
         pub fn balance_of(&self, owner: AccountId) -> Balance {
             // ACTION: Return the balance of `owner`
             //   HINT: Use `balance_of_or_zero` to get the `owner` balance
+            self.balance_of_or_zero(&owner)
         }
 
         fn balance_of_or_zero(&self, owner: &AccountId) -> Balance {
             // ACTION: `get` the balance of `owner`, then `unwrap_or` fallback to 0
             // ACTION: Return the balance
+            *self.balances.get(owner).unwrap_or(&0u128)
         }
     }
 
