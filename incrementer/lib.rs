@@ -6,14 +6,26 @@ use ink_lang as ink;
 mod incrementer {
     #[ink(storage)]
     pub struct Incrementer {
-        // Storage Declaration
+        flag: bool,
+        value: i32,
     }
 
     impl Incrementer {
         #[ink(constructor)]
         pub fn new(init_value: i32) -> Self {
             // Contract Constructor
-            Self{}
+            Self {
+                flag: false,
+                value: init_value,
+            }
+        }
+
+        #[ink(constructor)]
+        pub fn default() -> Self {
+            Self {
+                flag: false,
+                value: 0,
+            }
         }
 
         #[ink(message)]
@@ -29,7 +41,7 @@ mod incrementer {
 
         #[ink::test]
         fn default_works() {
-            // Test Your Contract
+            Incrementer::default();
         }
     }
 }
