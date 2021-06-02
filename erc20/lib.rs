@@ -11,28 +11,45 @@ mod erc20 {
         total_supply: Balance,
         /// The balance of each user.
         balances: ink_storage::collections::HashMap<AccountId, Balance>,
+        /// Approval spender on behalf of the message's sender.
+        //  ACTION: Add an `allowances` storage item. It should be a
+        //         `HashMap` from `(AccountId, AccountId)` to `Balance`
+        allowances: ink_storage::collections::HashMap<(AccountId, AccountId), Balance>,
     }
 
     #[ink(event)]
     pub struct Transfer {
-        //  ACTION: Create a `Transfer` event with:
-        //          * from: Option<AccountId>
-        //          * to: Option<AccountId>
-        //          * value: Balance
+        #[ink(topic)]
         from: Option<AccountId>,
+        #[ink(topic)]
         to: Option<AccountId>,
+        #[ink(topic)]
+        value: Balance,
+    }
+
+    // ACTION: Add an `Approval` event
+    //         It should emit the following:
+    //         * `owner` as an `AccountId`
+    //         * `spender` as an `AccountId`
+    //         * `value` as a `Balance`
+
+    #[ink(event)]
+    pub struct Approval {
+        #[ink(topic)]
+        owner: Option<AccountId>,
+        #[ink(topic)]
+        spender: Option<AccountId>,
+        #[ink(topic)]
         value: Balance,
     }
 
     impl Erc20 {
         #[ink(constructor)]
         pub fn new(initial_supply: Balance) -> Self {
-            let mut balances = ink_storage::collections::HashMap::new();
             let caller = Self::env().caller();
+            let mut balances = ink_storage::collections::HashMap::new();
+            let allowances = ink_storage::collections::HashMap::new();
             balances.insert(caller, initial_supply);
-
-            // ACTION: Call `Self::env().emit_event` with the `Transfer` event
-            //   HINT: Since we use `Option<AccountId>`, you need to wrap accounts in `Some()`
 
             Self::env().emit_event(Transfer {
                 from: None,
@@ -43,6 +60,7 @@ mod erc20 {
             Self {
                 total_supply: initial_supply,
                 balances,
+                allowances,
             }
         }
 
@@ -57,44 +75,85 @@ mod erc20 {
         }
 
         #[ink(message)]
-        pub fn transfer(&mut self, to: AccountId, value: Balance) -> bool {
-            // ACTION: Call the `transfer_from_to` with `from` as `self.env().caller()`
-            self.transfer_from_to(self.env().caller(), to, value)
+        pub fn approve(&mut self, spender: AccountId, value: Balance) -> bool {
+            // ACTION: Get the `self.env().caller()` and store it as the `owner`
+            let owner = self.env().caller();
+            // ACTION: Insert the new allowance into the `allowances` HashMap
+            //   HINT: The key tuple is `(owner, spender)`
+            self.allowances.insert((owner, spender), value);
+            // ACTION: `emit` the `Approval` event you created using these values
+            self.env().emit_event(Approval {
+                owner: Some(owner),
+                spender: Some(spender),
+                value,
+            });
+            // ACTION: Return true if everything was successful
+            true
         }
 
-        fn transfer_from_to(&mut self, from: AccountId, to: AccountId, value: Balance) -> bool {
-            // ACTION: Get the balance for `from` and `to`
-            //   HINT: Use the `balance_of_or_zero` function to do this
-            // ACTION: If `from_balance` is less than `value`, return `false`
-            // ACTION: Insert new values for `from` and `to`
-            //         * from_balance - value
-            //         * to_balance + value
-            // ACTION: Return `true`
-            let from_balance = self.balance_of_or_zero(&from);
-            if from_balance < value {
+        #[ink(message)]
+        pub fn allowance(&self, owner: AccountId, spender: AccountId) -> Balance {
+            // ACTION: Create a getter for the `allowances` HashMap
+            //   HINT: Take a look at the getters above if you forget the details
+            self.allowance_of_or_zero(&owner, &spender)
+            // ACTION: Return the `allowance` value
+        }
+
+        #[ink(message)]
+        pub fn transfer_from(&mut self, from: AccountId, to: AccountId, value: Balance) -> bool {
+            // ACTION: Get the allowance for `(from, self.env().caller())` using `allowance_of_or_zero`
+            // ACTION: `if` the `allowance` is less than the `value`, exit early and return `false`
+            let caller = self.env().caller();
+            let allowance = self.allowance_of_or_zero(&from, &caller);
+            if allowance < value {
                 false
             } else {
-                self.balances
-                    .entry(from)
-                    .and_modify(|old_value| *old_value -= value);
-                self.balances
-                    .entry(to)
-                    .and_modify(|old_value| *old_value += value)
-                    .or_insert(value);
-                // ACTION: Call `self.env().emit_event` with the `Transfer` event
-                //   HINT: Since we use `Option<AccountId>`, you need to wrap accounts in `Some()`
-
-                Self::env().emit_event(Transfer {
-                    from: Some(from),
-                    to: Some(to),
-                    value,
-                });
+                // ACTION: `insert` the new allowance into the map for `(from, self.env().caller())`
+                // ACTION: Finally, call the `transfer_from_to` for `from` and `to`
+                // ACTION: Return true if everything was successful
+                let transfer_result = self.transfer_from_to(from, to, value);
+                if !transfer_result {
+                    return false;
+                }
+                self.allowances.insert((from, caller), allowance - value);
                 true
             }
         }
 
+        #[ink(message)]
+        pub fn transfer(&mut self, to: AccountId, value: Balance) -> bool {
+            self.transfer_from_to(self.env().caller(), to, value)
+        }
+
+        fn transfer_from_to(&mut self, from: AccountId, to: AccountId, value: Balance) -> bool {
+            let from_balance = self.balance_of_or_zero(&from);
+            if from_balance < value {
+                return false;
+            }
+
+            // Update the sender's balance.
+            self.balances.insert(from, from_balance - value);
+
+            // Update the receiver's balance.
+            let to_balance = self.balance_of_or_zero(&to);
+            self.balances.insert(to, to_balance + value);
+
+            self.env().emit_event(Transfer {
+                from: Some(from),
+                to: Some(to),
+                value,
+            });
+
+            true
+        }
+
         fn balance_of_or_zero(&self, owner: &AccountId) -> Balance {
             *self.balances.get(owner).unwrap_or(&0)
+        }
+
+        fn allowance_of_or_zero(&self, owner: &AccountId, spender: &AccountId) -> Balance {
+            // ACTION: `get` the `allowances` of `(owner, spender)` and `unwrap_or` return `0`.
+            *self.allowances.get(&(*owner, *spender)).unwrap_or(&0)
         }
     }
 
@@ -125,6 +184,15 @@ mod erc20 {
             assert!(contract.transfer(AccountId::from([0x0; 32]), 10));
             assert_eq!(contract.balance_of(AccountId::from([0x0; 32])), 10);
             assert!(!contract.transfer(AccountId::from([0x0; 32]), 100));
+        }
+
+        #[ink::test]
+        fn transfer_from_works() {
+            let mut contract = Erc20::new(100);
+            assert_eq!(contract.balance_of(AccountId::from([0x1; 32])), 100);
+            contract.approve(AccountId::from([0x1; 32]), 20);
+            contract.transfer_from(AccountId::from([0x1; 32]), AccountId::from([0x0; 32]), 10);
+            assert_eq!(contract.balance_of(AccountId::from([0x0; 32])), 10);
         }
     }
 }
